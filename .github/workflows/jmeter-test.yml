@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       har_file:
-        description: "Upload the HAR file for conversion"
+        description: "Path of the HAR file in your repo"
         required: true
         type: string
       users:
@@ -36,13 +36,13 @@ jobs:
 
     # Step 1: Checkout
     - name: Checkout Repo
-    - uses: actions/checkout@v4
+      uses: actions/checkout@v4
 
-    # Step 2: Download HAR file from workflow input
-    - name: Download HAR from input path
+    # Step 2: Download HAR file from GitHub workflow input
+    - name: Download HAR from repo path
       run: |
         echo "HAR FILE: ${{ github.event.inputs.har_file }}"
-        cp "${{ github.event.inputs.har_file }}" ./input.har
+        cp "${{ github.workspace }}/${{ github.event.inputs.har_file }}" ./input.har
 
     # Step 3: Setup Java
     - name: Install Java
@@ -51,7 +51,7 @@ jobs:
         distribution: 'temurin'
         java-version: '17'
 
-    # Step 4: Download the HAR→JMX plugin JAR
+    # Step 4: Download HAR→JMX JAR
     - name: Download HAR Converter Plugin
       run: |
         wget -O har-converter.jar \
@@ -61,23 +61,23 @@ jobs:
     - name: Convert HAR to JMX
       run: |
         java -cp har-converter.jar \
-        io.github.vdaburon.jmeterplugins.har.HarConvertorIntegrate \
-        -har_in input.har \
-        -jmx_out generated_test.jmx \
-        -add_pause true \
-        -new_tc_pause 3000
-        
+          io.github.vdaburon.jmeterplugins.har.HarConvertorIntegrate \
+          -har_in input.har \
+          -jmx_out generated_test.jmx \
+          -add_pause true \
+          -new_tc_pause 3000
+
         echo "HAR conversion complete."
         ls -l generated_test.jmx
 
-    # Step 6: Validate that conversion worked
-    - name: Validate JMX output
+    # Step 6: Validate JMX output
+    - name: Validate JMX Output
       run: |
         if [ ! -s generated_test.jmx ]; then
-          echo "❌ ERROR: JMX file is empty. HAR conversion failed."
+          echo "❌ ERROR: JMX file is empty. Conversion failed."
           exit 1
         fi
-        echo "JMX is valid."
+        echo "JMX validation OK."
 
     # Step 7: Setup Docker
     - name: Setup Docker
@@ -88,19 +88,17 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y docker-compose
 
-    # Step 8: Limit inputs
-    - name: Enforce limits
+    # Step 8: Enforce Limits
+    - name: Enforce Limits
       run: |
         u=${{ github.event.inputs.users }}
         i=${{ github.event.inputs.iterations }}
-
         if [ "$u" -gt 3 ]; then u=3; fi
         if [ "$i" -gt 3 ]; then i=3; fi
-
         echo "users=$u" >> $GITHUB_ENV
         echo "iterations=$i" >> $GITHUB_ENV
 
-    # Step 9: Run JMeter with generated JMX
+    # Step 9: Run JMeter Load Test
     - name: Run JMeter Test
       run: |
         mkdir -p results
