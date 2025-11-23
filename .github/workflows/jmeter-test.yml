@@ -1,26 +1,30 @@
-name: Execute JMeter Test
+name: Execute JMeter Test (HAR → JMX → Load Test)
 
 on:
   workflow_dispatch:
     inputs:
+      har_file:
+        description: "Upload the HAR file for conversion"
+        required: true
+        type: string
       users:
-        description: 'Number of users for the JMeter test. Max limit is 3 for this example'
+        description: "Number of users (max 3)"
         required: true
         default: 1
       iterations:
-        description: 'Number of iterations for the JMeter test. Max limit is 3 for this example'
+        description: "Number of iterations (max 3)"
         required: true
         default: 1
       constant_time:
-        description: 'Constant time in milliseconds'
+        description: "Constant think time (ms)"
         required: true
         default: 1000
       random_time:
-        description: 'Random time in milliseconds'
+        description: "Random time (ms)"
         required: true
         default: 10000
       random_time_variance:
-        description: 'Variance for random time in milliseconds'
+        description: "Variance (ms)"
         required: true
         default: 3000
 
@@ -29,55 +33,89 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    # Step 1: Check out the repository
-    - name: Checkout repository
-      uses: actions/checkout@v4
 
-    # Step 2: Set up Docker
-    - name: Set up Docker
-      uses: docker/setup-buildx-action@v4
+    # Step 1: Checkout
+    - name: Checkout Repo
+    - uses: actions/checkout@v4
 
-    # Step 3: Install Docker Compose (ensuring it's available)
+    # Step 2: Download HAR file from workflow input
+    - name: Download HAR from input path
+      run: |
+        echo "HAR FILE: ${{ github.event.inputs.har_file }}"
+        cp "${{ github.event.inputs.har_file }}" ./input.har
+
+    # Step 3: Setup Java
+    - name: Install Java
+      uses: actions/setup-java@v4
+      with:
+        distribution: 'temurin'
+        java-version: '17'
+
+    # Step 4: Download the HAR→JMX plugin JAR
+    - name: Download HAR Converter Plugin
+      run: |
+        wget -O har-converter.jar \
+        https://repo1.maven.org/maven2/io/github/vdaburon/jmeter-har-convertor/8.0/jmeter-har-convertor-8.0-jar-with-dependencies.jar
+
+    # Step 5: Convert HAR → JMX
+    - name: Convert HAR to JMX
+      run: |
+        java -cp har-converter.jar \
+        io.github.vdaburon.jmeterplugins.har.HarConvertorIntegrate \
+        -har_in input.har \
+        -jmx_out generated_test.jmx \
+        -add_pause true \
+        -new_tc_pause 3000
+        
+        echo "HAR conversion complete."
+        ls -l generated_test.jmx
+
+    # Step 6: Validate that conversion worked
+    - name: Validate JMX output
+      run: |
+        if [ ! -s generated_test.jmx ]; then
+          echo "❌ ERROR: JMX file is empty. HAR conversion failed."
+          exit 1
+        fi
+        echo "JMX is valid."
+
+    # Step 7: Setup Docker
+    - name: Setup Docker
+      uses: docker/setup-buildx-action@v3
+
     - name: Install Docker Compose
       run: |
         sudo apt-get update
         sudo apt-get install -y docker-compose
 
-    # Step 3.1: Restrict users and iterations input to a maximum of 3
-    - name: Set users and iterations limits
+    # Step 8: Limit inputs
+    - name: Enforce limits
       run: |
-        users=${{ github.event.inputs.users }}
-        iterations=${{ github.event.inputs.iterations }}
-        
-        # Restrict max users and iterations to 3
-        if [ "$users" -gt 3 ]; then
-          users=3
-        fi
-        if [ "$iterations" -gt 3 ]; then
-          iterations=3
-        fi
-        
-        echo "USERS: $users"
-        echo "ITERATIONS: $iterations"
-        
-        echo "users=$users" >> $GITHUB_ENV
-        echo "iterations=$iterations" >> $GITHUB_ENV
+        u=${{ github.event.inputs.users }}
+        i=${{ github.event.inputs.iterations }}
 
-    # Step 4: Run JMeter tests with Docker
-    - name: Run JMeter Tests
+        if [ "$u" -gt 3 ]; then u=3; fi
+        if [ "$i" -gt 3 ]; then i=3; fi
+
+        echo "users=$u" >> $GITHUB_ENV
+        echo "iterations=$i" >> $GITHUB_ENV
+
+    # Step 9: Run JMeter with generated JMX
+    - name: Run JMeter Test
       run: |
+        mkdir -p results
         docker run --rm \
           -v ${{ github.workspace }}:/jmeter \
           -v ${{ github.workspace }}/results:/results \
           -w /jmeter justb4/jmeter:5.5 \
-          -n -t ./google_search.jmx -l ./results/results.jtl \
+          -n -t generated_test.jmx -l ./results/results.jtl \
           -Jusers=${{ env.users }} \
           -Jiterations=${{ env.iterations }} \
           -Jconstant_time=${{ github.event.inputs.constant_time }} \
           -Jrandom_time=${{ github.event.inputs.random_time }} \
           -Jrandom_time_variance=${{ github.event.inputs.random_time_variance }}
 
-    # Step 5: Generate JMeter HTML Report
+    # Step 10: Generate HTML report
     - name: Generate JMeter Report
       run: |
         docker run --rm \
@@ -86,10 +124,9 @@ jobs:
           -w /jmeter justb4/jmeter:5.5 \
           -g ./results/results.jtl -o ./results/report
 
-    # Step 6: Upload HTML Report as artifact
-    - name: Upload JMeter HTML Report
-      uses: actions/upload-artifact@v3
+    # Step 11: Upload report
+    - name: Upload Report
+      uses: actions/upload-artifact@v4
       with:
-        name: jmeter-report
+        name: JMeter-Report
         path: ./results/report
-        retention-days: 8
