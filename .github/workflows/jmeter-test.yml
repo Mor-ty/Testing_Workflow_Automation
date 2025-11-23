@@ -54,20 +54,21 @@ jobs:
     # Step 4: Download HAR→JMX JAR
     - name: Download HAR Converter Plugin
       run: |
-        wget -O har-converter.jar \
-        https://repo1.maven.org/maven2/io/github/vdaburon/jmeter-har-convertor/8.0/jmeter-har-convertor-8.0-jar-with-dependencies.jar
-
+        git clone https://github.com/vdaburon/har-to-jmeter-convertor.git
+        cd har-to-jmeter-convertor
+        mvn clean package
+        ls -l target/
     # Step 5: Convert HAR → JMX
     - name: Convert HAR to JMX
       run: |
-        java -cp har-converter.jar \
-          io.github.vdaburon.jmeterplugins.har.HarConvertorIntegrate \
-          -har_in input.har \
-          -jmx_out generated_test.jmx \
+        cd har-to-jmeter-convertor
+        java -cp target/har-to-jmeter-convertor-7.0-jar-with-dependencies.jar \
+          io.github.vdaburon.jmeter.har.HarConvertorIntegrate \
+          -har_in ../../input.har \
+          -jmx_out ../../generated_test.jmx \
           -add_pause true \
           -new_tc_pause 3000
-
-        echo "HAR conversion complete."
+        cd ../
         ls -l generated_test.jmx
 
     # Step 6: Validate JMX output
